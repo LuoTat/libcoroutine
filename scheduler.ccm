@@ -1,0 +1,62 @@
+module;
+#include "cds/container/vyukov_mpmc_cycle_queue.h"
+#include <functional>
+
+export module Coroutine.Scheduler;
+
+import std;
+import Coroutine.Fiber;
+
+namespace ltt
+{
+
+export class Scheduler: public std::enable_shared_from_this<Scheduler>
+{
+public:
+    // 调度器状态
+    enum class State
+    {
+        STOP,
+        RUNNING,
+        STOPPING
+    };
+
+    Scheduler() = default;
+
+    Scheduler(std::size_t threads);
+
+    virtual ~Scheduler();
+
+    // 启动线程池
+    virtual void start();
+
+    // 关闭线程池
+    virtual void stop();
+
+    // 添加任务到任务队列
+    void add_task(std::function<void()> func);
+
+    void add_task(std::shared_ptr<Fiber> fiber);
+
+protected:
+    // 线程函数
+    virtual void scheduler();
+
+    // 空闲协程函数
+    virtual void idle();
+
+    // 是否正在关闭
+    virtual bool is_stopping();
+
+    bool has_idle_threads() const;
+
+private:
+    State                                                        m_state {State::STOP};
+    cds::container::VyukovMPMCCycleQueue<std::shared_ptr<Fiber>> m_tasks {4096};
+    std::vector<std::jthread>                                    m_threads;
+    std::size_t                                                  m_thread_size {0};
+    std::atomic_uint_fast64_t                                    m_idle_thread_count;
+    std::atomic_uint_fast64_t                                    m_active_thread_count;
+};
+
+}    // namespace ltt

@@ -1,0 +1,123 @@
+module;
+#include <chrono>
+#include "cds/container/ellen_bintree_set_hp.h"
+
+export module Coroutine.TimerManager;
+
+import std;
+
+namespace ltt
+{
+
+struct Timer
+{
+    using MS        = std::chrono::milliseconds;
+    using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
+    using Key       = TimePoint;
+
+    struct TimerCompare
+    {
+        int operator()(const Timer& v1, const Timer& v2) const
+        {
+            if (v1 < v2)
+                return -1;
+            return (v1 > v2) ? 1 : 0;
+        }
+
+        int operator()(const Key& k1, const Key& k2) const
+        {
+            if (k1 < k2)
+                return -1;
+            return (k1 > k2) ? 1 : 0;
+        }
+
+        int operator()(const Timer& v, const Key& k) const
+        {
+            if (v.m_expired_time < k)
+                return -1;
+            return (v.m_expired_time > k) ? 1 : 0;
+        }
+
+        int operator()(const Key& k, const Timer& v) const
+        {
+            if (k < v.m_expired_time)
+                return -1;
+            return (k > v.m_expired_time) ? 1 : 0;
+        }
+    };
+
+    struct TimerKeyExtractor
+    {
+        using key_type   = Key;
+        using value_type = Timer;
+
+        void operator()(key_type& dest, const value_type& src) const noexcept
+        {
+            dest = src.m_expired_time;
+        }
+    };
+
+    using TimerTraits = cds::container::ellen_bintree::make_set_traits<
+        cds::container::ellen_bintree::key_extractor<TimerKeyExtractor>,
+        cds::opt::compare<TimerCompare>>::type;
+
+    Timer() = default;
+
+    Timer(MS ms, TimePoint time_point, bool is_recurring, std::function<void()> func);
+
+    bool operator==(const Timer& rhs) const;
+
+    std::strong_ordering operator<=>(const Timer& rhs) const;
+
+    MS                    m_interval;
+    bool                  m_is_recurring {false};
+    std::function<void()> m_func;
+    TimePoint             m_expired_time;
+};
+
+export class TimerManager
+{
+public:
+    using MS        = Timer::MS;
+    using TimePoint = Timer::TimePoint;
+
+    TimerManager() = default;
+
+    virtual ~TimerManager() = default;
+
+    // 添加 timer
+    TimePoint add_timer(MS ms, bool is_recurring, std::function<void()> func);
+
+    // 添加条件 timer
+    TimePoint add_condition_timer(MS ms, bool is_recurring, std::weak_ptr<void> weak_cond, std::function<void()> func);
+
+    // 从时间堆中删除 timer
+    bool del_timer(TimePoint timer_point);
+
+    // 刷新 timer
+    bool refresh_timer(TimePoint timer_point);
+
+    // 重设 timer 的超时时间
+    bool reset_timer(TimePoint timer_point, MS ms, bool from_now);
+
+    // 获取堆中最近的超时时间
+    std::chrono::milliseconds get_time_until_next_expired();
+
+    // 取出所有超时定时器的回调函数
+    std::vector<std::function<void()>> get_expired_funcs();
+
+    // 堆中是否有 timer
+    bool empty() const;
+
+private:
+    using GC       = cds::gc::HP;
+    using TimerSet = cds::container::EllenBinTreeSet<GC, Timer::Key, Timer, Timer::TimerTraits>;
+
+    // 当系统时间改变时调用该函数
+    bool detect_clock_rollover();
+
+    TimerSet  m_timers;
+    TimePoint m_previouse_time {std::chrono::system_clock::now()};
+};
+
+}    // namespace ltt

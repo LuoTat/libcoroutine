@@ -1,0 +1,69 @@
+module;
+#include "cds/container/feldman_hashmap_hp.h"
+
+export module Coroutine.IOScheduler;
+
+import std;
+import Coroutine.Fiber;
+import Coroutine.Scheduler;
+import Coroutine.TimerManager;
+
+namespace ltt
+{
+
+// 用于记录一个具体事件的上下文
+export struct EventCtx
+{
+    // 事件的回调函数或协程
+    std::variant<std::function<void()>, std::shared_ptr<Fiber>> ctx;
+};
+
+// 用于记录一个文件描述符的上下文
+export struct FdCtx
+{
+    FdCtx(int fd);
+
+    EventCtx& get_event_ctx(std::uint32_t event);
+
+    int           fd;
+    bool          read_keepalive {false};
+    bool          write_keepalive {false};
+    EventCtx      read_ctx;
+    EventCtx      write_ctx;
+    std::uint32_t events {0};
+    std::mutex    mutex;
+};
+
+export class IOScheduler: public Scheduler,
+                          public TimerManager
+{
+public:
+    IOScheduler(std::size_t threads);
+
+    ~IOScheduler();
+
+    // 添加一个事件
+    bool add_event(int fd, std::uint32_t event, bool keepalive, std::function<void()> func);
+    bool add_event_as_fiber_yield(int fd, std::uint32_t event, bool keepalive);
+    // 删除一个事件
+    bool del_event(int fd, std::uint32_t event);
+    // 删除一个事件并触发其回调函数
+    bool cancel_event(int fd, std::uint32_t event);
+    // 删除所有事件并触发其回调函数
+    bool cancel_all(int fd);
+
+protected:
+    void idle() override;
+
+    bool is_stopping() override;
+
+private:
+    // 执行一个事件
+    bool run_event(std::unique_ptr<FdCtx>& fd_ctx, std::uint32_t event);
+
+    int                                                                      m_epfd;
+    cds::container::FeldmanHashMap<cds::gc::HP, int, std::unique_ptr<FdCtx>> m_fd_ctxs;
+    std::atomic_uint_fast64_t                                                m_event_count;
+};
+
+}    // namespace ltt

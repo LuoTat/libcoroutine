@@ -1,0 +1,67 @@
+module;
+#include <ucontext.h>
+
+export module Coroutine.Fiber;
+
+import std;
+
+namespace ltt
+{
+
+export class Fiber: public std::enable_shared_from_this<Fiber>
+{
+
+public:
+    // 协程状态
+    enum class State
+    {
+        READY,
+        RUNNING,
+        TERM
+    };
+
+    Fiber() = default;
+
+    Fiber(std::size_t stacksize, std::function<void()> func);
+
+    Fiber(const Fiber& rhs) = delete;
+
+    Fiber(Fiber&& rhs) noexcept;
+
+    ~Fiber();
+
+    Fiber& operator=(const Fiber& rhs) = delete;
+
+    Fiber& operator=(Fiber&& rhs) noexcept;
+
+    void swap(Fiber& other) noexcept;
+
+    // 协程恢复
+    void resume();
+
+    // 协程挂起
+    void yield();
+
+    [[nodiscard]]
+    State get_state() const;
+
+    // 初始化调度线程里面的调度协程
+    static void init_scheduler_fiber();
+
+    // 获取当前运行的协程
+    static std::shared_ptr<Fiber> get_running_fiber();
+
+    // 判读当前线程是不是调度线程
+    static bool is_in_scheduler();
+
+private:
+    friend void func_wapper();
+
+    State                 m_state {State::TERM};
+    ucontext_t            m_ctx;
+    void*                 m_stack {nullptr};
+    std::size_t           m_stack_size {0};
+    std::function<void()> m_func;
+};
+
+}    // namespace ltt
