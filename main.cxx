@@ -43,7 +43,12 @@ int main()
     setsockopt(sock_listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
     // 绑定套接字并监听连接
-    bind(sock_listen_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+    if (bind(sock_listen_fd, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) == -1)
+    {
+        std::println("bind error: {}", std::strerror(errno));
+        return -1;
+    }
+
     listen(sock_listen_fd, 1024);
 
     io_scheduler->add_event(sock_listen_fd, EPOLLIN, true,
