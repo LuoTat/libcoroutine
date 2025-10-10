@@ -142,7 +142,6 @@ extern "C"
         s_hook_io_scheduler->add_timer(__seconds * 1000ms, false,
                                        [fiber]
                                        {
-                                           // s_hook_io_scheduler->add_task(fiber);
                                            fiber->resume();
                                        });
         fiber->yield();
@@ -158,7 +157,6 @@ extern "C"
         s_hook_io_scheduler->add_timer(std::chrono::milliseconds {__useconds / 1000}, false,
                                        [fiber]
                                        {
-                                           // s_hook_io_scheduler->add_task(fiber);
                                            fiber->resume();
                                        });
         fiber->yield();
@@ -195,7 +193,6 @@ extern "C"
         s_hook_io_scheduler->add_timer(ms, false,
                                        [fiber]
                                        {
-                                           // s_hook_io_scheduler->add_task(fiber);
                                            fiber->resume();
                                        });
         fiber->yield();
@@ -347,15 +344,6 @@ extern "C"
             case F_GETFL :
             {
                 va_end(va);
-                // int arg {fcntl_origin(__fd, __cmd)};
-
-                // if (!s_hook_enable || !is_socket(__fd))
-                //     return arg;
-
-                // // 这里是呈现给用户显示的为用户设定的值
-                // // 但是底层还是根据系统设置决定的
-                // if (!s_fd_user_nonblock.test(__fd))
-                //     return arg & ~O_NONBLOCK;
                 return fcntl_origin(__fd, F_GETFL);
             }
             break;
