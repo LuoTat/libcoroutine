@@ -1,38 +1,7 @@
 module;
-#include <unistd.h>
 #include <dlfcn.h>
 #include <sys/socket.h>
-
-// extern "C"
-// {
-//     // #include <unistd.h>
-//     unsigned int sleep(unsigned int __seconds);
-//     int          usleep(__useconds_t __useconds);
-//     ssize_t      read(int __fd, void* __buf, size_t __nbytes);
-//     ssize_t      write(int __fd, const void* __buf, size_t __n);
-//     int          close(int __fd);
-//     // #include <time.h>
-//     int nanosleep(const struct timespec* __requested_time, struct timespec* __remaining);
-//     // #include <sys/socket.h>
-//     int     socket(int __domain, int __type, int __protocol) __THROW;
-//     int     getsockopt(int __fd, int __level, int __optname, void* __restrict __optval, socklen_t* __restrict __optlen) __THROW;
-//     int     setsockopt(int __fd, int __level, int __optname, const void* __optval, socklen_t __optlen) __THROW;
-//     int     connect(int __fd, __CONST_SOCKADDR_ARG __addr, socklen_t __len);
-//     int     accept(int __fd, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len);
-//     ssize_t send(int __fd, const void* __buf, size_t __n, int __flags);
-//     ssize_t recv(int __fd, void* __buf, size_t __n, int __flags);
-//     ssize_t sendto(int __fd, const void* __buf, size_t __n, int __flags, __CONST_SOCKADDR_ARG __addr, socklen_t __addr_len);
-//     ssize_t recvfrom(int __fd, void* __restrict __buf, size_t __n, int __flags, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len);
-//     ssize_t sendmsg(int __fd, const struct msghdr* __message, int __flags);
-//     ssize_t recvmsg(int __fd, struct msghdr* __message, int __flags);
-//     // #include <sys/uio.h>
-//     ssize_t readv(int __fd, const struct iovec* __iovec, int __count);
-//     ssize_t writev(int __fd, const struct iovec* __iovec, int __count);
-//     // #include <fcntl.h>
-//     int fcntl(int __fd, int __cmd, ...);
-//     // #include <sys/ioctl.h>
-//     int ioctl(int __fd, unsigned long int __request, ...) __THROW;
-// }
+#include <unistd.h>
 
 export module Coroutine.Hook;
 
@@ -50,27 +19,29 @@ export void                         set_hook_enable(bool flag);
 
 export extern "C"
 {
-    using sleep_fun      = unsigned int (*)(unsigned int __seconds);
-    using usleep_fun     = int (*)(__useconds_t __useconds);
-    using read_fun       = ssize_t (*)(int __fd, void* __buf, size_t __nbytes);
-    using write_fun      = ssize_t (*)(int __fd, const void* __buf, size_t __n);
-    using close_fun      = int (*)(int __fd);
-    using nanosleep_fun  = int (*)(const struct timespec* __requested_time, struct timespec* __remaining);
-    using socket_fun     = int (*)(int __domain, int __type, int __protocol) __THROW;
-    using getsockopt_fun = int (*)(int __fd, int __level, int __optname, void* __restrict __optval, socklen_t* __restrict __optlen) __THROW;
-    using setsockopt_fun = int (*)(int __fd, int __level, int __optname, const void* __optval, socklen_t __optlen) __THROW;
-    using connect_fun    = int (*)(int __fd, __CONST_SOCKADDR_ARG __addr, socklen_t __len);
-    using accept_fun     = int (*)(int __fd, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len);
-    using send_fun       = ssize_t (*)(int __fd, const void* __buf, size_t __n, int __flags);
-    using recv_fun       = ssize_t (*)(int __fd, void* __buf, size_t __n, int __flags);
-    using sendto_fun     = ssize_t (*)(int __fd, const void* __buf, size_t __n, int __flags, __CONST_SOCKADDR_ARG __addr, socklen_t __addr_len);
-    using recvfrom_fun   = ssize_t (*)(int __fd, void* __restrict __buf, size_t __n, int __flags, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len);
-    using sendmsg_fun    = ssize_t (*)(int __fd, const struct msghdr* __message, int __flags);
-    using recvmsg_fun    = ssize_t (*)(int __fd, struct msghdr* __message, int __flags);
-    using readv_fun      = ssize_t (*)(int __fd, const struct iovec* __iovec, int __count);
-    using writev_fun     = ssize_t (*)(int __fd, const struct iovec* __iovec, int __count);
-    using fcntl_fun      = int (*)(int __fd, int __cmd, ...);
-    using ioctl_fun      = int (*)(int __fd, unsigned long int __request, ...) __THROW;
+    // clang-format off
+    using sleep_fun      = unsigned int (*)(unsigned int seconds);
+    using usleep_fun     = int          (*)(__useconds_t useconds);
+    using read_fun       = ssize_t      (*)(int fd, void* buf, size_t nbytes);
+    using write_fun      = ssize_t      (*)(int fd, const void* buf, size_t n);
+    using close_fun      = int          (*)(int fd);
+    using nanosleep_fun  = int          (*)(const struct timespec* requested_time, struct timespec* remaining);
+    using socket_fun     = int          (*)(int domain, int type, int protocol) __THROW;
+    using getsockopt_fun = int          (*)(int fd, int level, int optname, void* __restrict optval, socklen_t* __restrict optlen) __THROW;
+    using setsockopt_fun = int          (*)(int fd, int level, int optname, const void* optval, socklen_t optlen) __THROW;
+    using connect_fun    = int          (*)(int fd, __CONST_SOCKADDR_ARG addr, socklen_t len);
+    using accept_fun     = int          (*)(int fd, __SOCKADDR_ARG addr, socklen_t* __restrict addr_len);
+    using send_fun       = ssize_t      (*)(int fd, const void* buf, size_t n, int flags);
+    using recv_fun       = ssize_t      (*)(int fd, void* buf, size_t n, int flags);
+    using sendto_fun     = ssize_t      (*)(int fd, const void* buf, size_t n, int flags, __CONST_SOCKADDR_ARG addr, socklen_t addr_len);
+    using recvfrom_fun   = ssize_t      (*)(int fd, void* __restrict buf, size_t n, int flags, __SOCKADDR_ARG addr, socklen_t* __restrict addr_len);
+    using sendmsg_fun    = ssize_t      (*)(int fd, const struct msghdr* message, int flags);
+    using recvmsg_fun    = ssize_t      (*)(int fd, struct msghdr* message, int flags);
+    using readv_fun      = ssize_t      (*)(int fd, const struct iovec* iovec, int count);
+    using writev_fun     = ssize_t      (*)(int fd, const struct iovec* iovec, int count);
+    using fcntl_fun      = int          (*)(int fd, int cmd, ...);
+    using ioctl_fun      = int          (*)(int fd, unsigned long int request, ...) __THROW;
+    // clang-format on
 
 #define HOOK_FUN(XX) \
     XX(sleep)        \

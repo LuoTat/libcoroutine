@@ -7,26 +7,22 @@ module Coroutine.Fiber;
 namespace ltt
 {
 
-static thread_local bool                   st_in_scheduler {false};
-static thread_local std::shared_ptr<Fiber> st_scheduler_fiber;
-static thread_local std::shared_ptr<Fiber> st_running_fiber;
-
 void func_wapper()
 {
-    assert(st_in_scheduler);
-    assert(st_running_fiber);
-    assert(st_running_fiber != st_scheduler_fiber);
-    assert(st_running_fiber->m_func);
-    assert(st_running_fiber->m_state == Fiber::State::RUNNING);
+    assert(Fiber::m_in_scheduler);
+    assert(Fiber::m_running_fiber);
+    assert(Fiber::m_running_fiber != Fiber::m_scheduler_fiber);
+    assert(Fiber::m_running_fiber->m_func);
+    assert(Fiber::m_running_fiber->m_state == Fiber::State::RUNNING);
 
-    st_running_fiber->m_func();
-    st_running_fiber->m_func  = nullptr;
-    st_running_fiber->m_state = Fiber::State::TERM;
-    st_running_fiber->yield();
+    Fiber::m_running_fiber->m_func();
+    Fiber::m_running_fiber->m_func  = nullptr;
+    Fiber::m_running_fiber->m_state = Fiber::State::TERM;
+    Fiber::m_running_fiber->yield();
 }
 
 Fiber::Fiber(std::size_t stacksize, std::function<void()> func):
-    m_state {State::READY}, m_stack_size {stacksize ? stacksize : 131072}, m_func {std::move(func)}
+    m_state {State::READY}, m_stack_size {(stacksize != 0U) ? stacksize : 131072}, m_func {std::move(func)}
 {
     assert(m_func);
 
@@ -72,33 +68,35 @@ void Fiber::swap(Fiber& other) noexcept
 */
 void Fiber::resume()
 {
-    assert(st_in_scheduler);
-    assert(st_running_fiber == st_scheduler_fiber);
-    assert(st_scheduler_fiber->m_state == State::RUNNING);
+    assert(m_in_scheduler);
+    assert(m_running_fiber == m_scheduler_fiber);
+    assert(m_scheduler_fiber->m_state == State::RUNNING);
     assert(m_state == State::READY);
 
-    st_scheduler_fiber->m_state = State::READY;
-    m_state                     = State::RUNNING;
-    st_running_fiber            = shared_from_this();
-    swapcontext(&st_scheduler_fiber->m_ctx, &m_ctx);
+    m_scheduler_fiber->m_state = State::READY;
+    m_state                    = State::RUNNING;
+    m_running_fiber            = shared_from_this();
+    swapcontext(&m_scheduler_fiber->m_ctx, &m_ctx);
 }
 
 void Fiber::yield()
 {
-    assert(st_in_scheduler);
-    assert(st_running_fiber == shared_from_this());
-    assert(st_scheduler_fiber->m_state == State::READY);
+    assert(m_in_scheduler);
+    assert(m_running_fiber == shared_from_this());
+    assert(m_scheduler_fiber->m_state == State::READY);
     assert(m_state == State::RUNNING || m_state == State::TERM);
 
-    st_scheduler_fiber->m_state = State::RUNNING;
+    m_scheduler_fiber->m_state = State::RUNNING;
 
     // 如果当前的协程是正在运行的状态
     // 则将其转为就绪状态
     if (m_state == State::RUNNING)
+    {
         m_state = State::READY;
+    }
 
-    st_running_fiber = st_scheduler_fiber;
-    swapcontext(&m_ctx, &st_scheduler_fiber->m_ctx);
+    m_running_fiber = m_scheduler_fiber;
+    swapcontext(&m_ctx, &m_scheduler_fiber->m_ctx);
 }
 
 Fiber::State Fiber::get_state() const
@@ -108,22 +106,22 @@ Fiber::State Fiber::get_state() const
 
 void Fiber::init_scheduler_fiber()
 {
-    st_in_scheduler = true;
+    m_in_scheduler = true;
 
-    st_scheduler_fiber          = std::make_shared<Fiber>();
-    st_scheduler_fiber->m_state = State::RUNNING;
-    getcontext(&st_scheduler_fiber->m_ctx);
-    st_running_fiber = st_scheduler_fiber;
+    m_scheduler_fiber          = std::make_shared<Fiber>();
+    m_scheduler_fiber->m_state = State::RUNNING;
+    getcontext(&m_scheduler_fiber->m_ctx);
+    m_running_fiber = m_scheduler_fiber;
 }
 
 std::shared_ptr<Fiber> Fiber::get_running_fiber()
 {
-    return st_running_fiber;
+    return m_running_fiber;
 }
 
 bool Fiber::is_in_scheduler()
 {
-    return st_in_scheduler;
+    return m_in_scheduler;
 }
 
 }    // namespace ltt

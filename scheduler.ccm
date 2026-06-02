@@ -14,7 +14,7 @@ export class Scheduler: public std::enable_shared_from_this<Scheduler>
 {
 public:
     // 调度器状态
-    enum class State
+    enum class State : std::uint8_t
     {
         STOP,
         RUNNING,
@@ -34,7 +34,7 @@ public:
     virtual void stop();
 
     // 添加任务到任务队列
-    void add_task(std::function<void()> func);
+    void add_task(const std::function<void()>& func);
 
     void add_task(std::shared_ptr<Fiber> fiber);
 

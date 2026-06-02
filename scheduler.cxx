@@ -1,6 +1,6 @@
 module;
-#include <cassert>
 #include "cds/gc/hp.h"
+#include <cassert>
 
 module Coroutine.Scheduler;
 
@@ -9,8 +9,7 @@ import Coroutine.Hook;
 namespace ltt
 {
 
-Scheduler::Scheduler(std::size_t threads):
-    m_thread_size {threads}
+Scheduler::Scheduler(std::size_t threads): m_thread_size {threads}
 {
     assert(m_thread_size > 0);
 }
@@ -31,7 +30,7 @@ void Scheduler::start()
     for (size_t i = 0; i < m_thread_size; ++i)
     {
         m_threads.emplace_back(
-            [self {shared_from_this()}]
+            [self {shared_from_this()}] -> void
             {
                 cds::threading::Manager::attachThread();
 
@@ -40,7 +39,8 @@ void Scheduler::start()
                 self->scheduler();
 
                 cds::threading::Manager::detachThread();
-            });
+            }
+        );
     }
 }
 
@@ -51,12 +51,14 @@ void Scheduler::stop()
     m_state = State::STOPPING;
 
     for (auto& thread : m_threads)
+    {
         thread.join();
+    }
 
     m_state = State::STOP;
 }
 
-void Scheduler::add_task(std::function<void()> func)
+void Scheduler::add_task(const std::function<void()>& func)
 {
     m_tasks.emplace(std::make_shared<Fiber>(0, func));
 }
@@ -69,13 +71,15 @@ void Scheduler::add_task(std::shared_ptr<Fiber> fiber)
 void Scheduler::scheduler()
 {
     // 创建空闲协程
-    auto idle_fiber {std::make_shared<Fiber>(0,
-                                             [self {shared_from_this()}]
-                                             {
-                                                 self->idle();
-                                             })};
+    auto idle_fiber {std::make_shared<Fiber>(
+        0,
+        [self {shared_from_this()}] -> void
+        {
+            self->idle();
+        }
+    )};
 
-    bool                   has_task;
+    bool                   has_task {};
     std::shared_ptr<Fiber> task;
     while (idle_fiber->get_state() != Fiber::State::TERM)
     {

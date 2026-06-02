@@ -64,6 +64,9 @@ private:
     int                                                                      m_epfd;
     cds::container::FeldmanHashMap<cds::gc::HP, int, std::unique_ptr<FdCtx>> m_fd_ctxs;
     std::atomic_uint_fast64_t                                                m_event_count;
+
+    inline static thread_local bool                         m_should_unlock {false};
+    inline static thread_local std::unique_lock<std::mutex> m_unique_lock;
 };
 
 }    // namespace ltt

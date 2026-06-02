@@ -1,6 +1,6 @@
 module;
-#include <chrono>
 #include "cds/container/ellen_bintree_set_hp.h"
+#include <chrono>
 
 export module Coroutine.TimerManager;
 
@@ -17,32 +17,40 @@ struct Timer
 
     struct TimerCompare
     {
-        int operator()(const Timer& v1, const Timer& v2) const
+        int operator()(const Timer& t1, const Timer& t2) const
         {
-            if (v1 < v2)
+            if (t1 < t2)
+            {
                 return -1;
-            return (v1 > v2) ? 1 : 0;
+            }
+            return (t1 > t2) ? 1 : 0;
         }
 
         int operator()(const Key& k1, const Key& k2) const
         {
             if (k1 < k2)
+            {
                 return -1;
+            }
             return (k1 > k2) ? 1 : 0;
         }
 
-        int operator()(const Timer& v, const Key& k) const
+        int operator()(const Timer& timer, const Key& key) const
         {
-            if (v.m_expired_time < k)
+            if (timer.m_expired_time < key)
+            {
                 return -1;
-            return (v.m_expired_time > k) ? 1 : 0;
+            }
+            return (timer.m_expired_time > key) ? 1 : 0;
         }
 
-        int operator()(const Key& k, const Timer& v) const
+        int operator()(const Key& key, const Timer& timer) const
         {
-            if (k < v.m_expired_time)
+            if (key < timer.m_expired_time)
+            {
                 return -1;
-            return (k > v.m_expired_time) ? 1 : 0;
+            }
+            return (key > timer.m_expired_time) ? 1 : 0;
         }
     };
 
@@ -59,7 +67,8 @@ struct Timer
 
     using TimerTraits = cds::container::ellen_bintree::make_set_traits<
         cds::container::ellen_bintree::key_extractor<TimerKeyExtractor>,
-        cds::opt::compare<TimerCompare>>::type;
+        cds::opt::compare<TimerCompare>
+    >::type;
 
     Timer() = default;
 
@@ -69,7 +78,7 @@ struct Timer
 
     std::strong_ordering operator<=>(const Timer& rhs) const;
 
-    MS                    m_interval;
+    MS                    m_interval {};
     bool                  m_is_recurring {false};
     std::function<void()> m_func;
     TimePoint             m_expired_time;
@@ -89,7 +98,9 @@ public:
     TimePoint add_timer(MS ms, bool is_recurring, std::function<void()> func);
 
     // 添加条件 timer
-    TimePoint add_condition_timer(MS ms, bool is_recurring, std::weak_ptr<void> weak_cond, std::function<void()> func);
+    TimePoint add_condition_timer(
+        MS ms, bool is_recurring, const std::weak_ptr<void>& weak_cond, const std::function<void()>& func
+    );
 
     // 从时间堆中删除 timer
     bool del_timer(TimePoint timer_point);

@@ -1,13 +1,14 @@
 module;
-#include <cerrno>
 #include <cassert>
+#include <cerrno>
 #include <cstdarg>
-#include <fcntl.h>
 #include <dlfcn.h>
-#include <unistd.h>
-#include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <utility>
 
 module Coroutine.Hook;
 
@@ -28,46 +29,33 @@ namespace ltt
 static thread_local bool            st_hook_enable {false};
 static std::shared_ptr<IOScheduler> s_hook_io_scheduler;
 
-std::shared_ptr<IOScheduler> get_hook_io_scheduler()
+namespace
 {
-    return s_hook_io_scheduler;
-}
 
-void set_hook_io_scheduler(std::shared_ptr<IOScheduler> hook_io_scheduler)
+bool is_socket(int fd)
 {
-    s_hook_io_scheduler = hook_io_scheduler;
-}
-
-bool is_hook_enable()
-{
-    return st_hook_enable;
-}
-
-void set_hook_enable(bool flag)
-{
-    st_hook_enable = flag;
-}
-
-static bool is_socket(int fd)
-{
-    struct stat st;
+    struct stat st {};
     if (fstat(fd, &st) == -1)
+    {
         return false;
+    }
 
     return S_ISSOCK(st.st_mode);    // 宏判断是否为 socket
 }
 
 template <typename OriginFun, typename... Args>
-static ssize_t socket_io(int fd, std::uint32_t event, int ms_type, OriginFun fun_origin, Args&&... args)
+ssize_t socket_io(int fd, std::uint32_t event, int ms_type, OriginFun fun_origin, Args&&... args)
 {
     // 如果没有启用 hook
     // 或者启用了 hook 但是 fd 不是 socket
     // 则直接调用原函数
     if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(fd))
+    {
         return fun_origin(fd, std::forward<Args>(args)...);
+    }
 
     // 获取超时时间
-    timeval   v;
+    timeval   v {};
     socklen_t len {sizeof(v)};
     getsockopt(fd, SOL_SOCKET, ms_type, &v, &len);
     auto ms {std::chrono::milliseconds(v.tv_sec * 1000 + v.tv_usec / 1000)};
@@ -95,12 +83,16 @@ retry:
         // 如果设置了超时时间，则添加一个条件定时器
         if (ms != std::chrono::milliseconds::zero())
         {
-            time_point = s_hook_io_scheduler->add_condition_timer(ms, false, weak_cond,
-                                                                  [fd, event, &is_timeout]
-                                                                  {
-                                                                      is_timeout = true;
-                                                                      s_hook_io_scheduler->cancel_event(fd, event);
-                                                                  });
+            time_point = s_hook_io_scheduler->add_condition_timer(
+                ms,
+                false,
+                weak_cond,
+                [fd, event, &is_timeout]
+                {
+                    is_timeout = true;
+                    s_hook_io_scheduler->cancel_event(fd, event);
+                }
+            );
         }
 
         // 将 fd 和事件添加到调度器中
@@ -109,7 +101,9 @@ retry:
             // 如果添加事件成功，则挂起当前协程，等待事件触发
             // 事件触发后，检查定时器是否被取消
             if (time_point != TimerManager::TimePoint::max())
+            {
                 s_hook_io_scheduler->del_timer(time_point);
+            }
 
             if (is_timeout)
             {
@@ -122,7 +116,9 @@ retry:
         {
             // 如果添加事件失败，则删除定时器并返回错误
             if (time_point != TimerManager::TimePoint::max())
+            {
                 s_hook_io_scheduler->del_timer(time_point);
+            }
 
             return -1;
         }
@@ -131,102 +127,149 @@ retry:
     return ret;
 }
 
+}    // namespace
+
+std::shared_ptr<IOScheduler> get_hook_io_scheduler()
+{
+    return s_hook_io_scheduler;
+}
+
+void set_hook_io_scheduler(std::shared_ptr<IOScheduler> hook_io_scheduler)
+{
+    s_hook_io_scheduler = std::move(hook_io_scheduler);
+}
+
+bool is_hook_enable()
+{
+    return st_hook_enable;
+}
+
+void set_hook_enable(bool flag)
+{
+    st_hook_enable = flag;
+}
+
 extern "C"
 {
-    unsigned int sleep(unsigned int __seconds)
+    unsigned int sleep(unsigned int seconds)
     {
         if (!st_hook_enable || !Fiber::is_in_scheduler())
-            return sleep_origin(__seconds);
+        {
+            return sleep_origin(seconds);
+        }
 
         auto fiber {Fiber::get_running_fiber()};
-        s_hook_io_scheduler->add_timer(__seconds * 1000ms, false,
-                                       [fiber]
-                                       {
-                                           fiber->resume();
-                                       });
+        s_hook_io_scheduler->add_timer(
+            seconds * 1000ms,
+            false,
+            [fiber] -> void
+            {
+                fiber->resume();
+            }
+        );
         fiber->yield();
         return 0;
     }
 
-    int usleep(__useconds_t __useconds)
+    int usleep(__useconds_t useconds)
     {
         if (!st_hook_enable || !Fiber::is_in_scheduler())
-            return usleep_origin(__useconds);
+        {
+            return usleep_origin(useconds);
+        }
 
         auto fiber {Fiber::get_running_fiber()};
-        s_hook_io_scheduler->add_timer(std::chrono::milliseconds {__useconds / 1000}, false,
-                                       [fiber]
-                                       {
-                                           fiber->resume();
-                                       });
+        s_hook_io_scheduler->add_timer(
+            std::chrono::milliseconds {useconds / 1000},
+            false,
+            [fiber] -> void
+            {
+                fiber->resume();
+            }
+        );
         fiber->yield();
         return 0;
     }
 
-    ssize_t read(int __fd, void* __buf, size_t __nbytes)
+    ssize_t read(int fd, void* buf, size_t nbytes)
     {
-        return socket_io(__fd, EPOLLIN, SO_RCVTIMEO, read_origin, __buf, __nbytes);
+        return socket_io(fd, EPOLLIN, SO_RCVTIMEO, read_origin, buf, nbytes);
     }
 
-    ssize_t write(int __fd, const void* __buf, size_t __n)
+    ssize_t write(int fd, const void* buf, size_t n)
     {
-        return socket_io(__fd, EPOLLOUT, SO_SNDTIMEO, write_origin, __buf, __n);
+        return socket_io(fd, EPOLLOUT, SO_SNDTIMEO, write_origin, buf, n);
     }
 
-    int close(int __fd)
+    int close(int fd)
     {
-        if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(__fd))
-            return close_origin(__fd);
+        if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(fd))
+        {
+            return close_origin(fd);
+        }
 
-        s_hook_io_scheduler->cancel_all(__fd);
-        return close_origin(__fd);
+        s_hook_io_scheduler->cancel_all(fd);
+        return close_origin(fd);
     }
 
-    int nanosleep(const struct timespec* __requested_time, struct timespec* __remaining)
+    int nanosleep(const struct timespec* requested_time, struct timespec* remaining)
     {
         if (!st_hook_enable || !Fiber::is_in_scheduler())
-            return nanosleep_origin(__requested_time, __remaining);
+        {
+            return nanosleep_origin(requested_time, remaining);
+        }
 
-        auto ms {std::chrono::milliseconds(__requested_time->tv_sec * 1000 + __requested_time->tv_nsec / 1000 / 1000)};
+        auto ms {std::chrono::milliseconds(requested_time->tv_sec * 1000 + requested_time->tv_nsec / 1000 / 1000)};
 
         auto fiber {Fiber::get_running_fiber()};
-        s_hook_io_scheduler->add_timer(ms, false,
-                                       [fiber]
-                                       {
-                                           fiber->resume();
-                                       });
+        s_hook_io_scheduler->add_timer(
+            ms,
+            false,
+            [fiber] -> void
+            {
+                fiber->resume();
+            }
+        );
         fiber->yield();
         return 0;
     }
 
-    int socket(int __domain, int __type, int __protocol) __THROW
+    int socket(int domain, int type, int protocol) __THROW
     {
         if (!st_hook_enable || !Fiber::is_in_scheduler())
-            return socket_origin(__domain, __type, __protocol);
+        {
+            return socket_origin(domain, type, protocol);
+        }
 
-        return socket_origin(__domain, __type | SOCK_NONBLOCK, __protocol);
+        return socket_origin(domain, type | SOCK_NONBLOCK, protocol);
     }
 
-    int getsockopt(int __fd, int __level, int __optname, void* __restrict __optval, socklen_t* __restrict __optlen) __THROW
+    int getsockopt(int fd, int level, int optname, void* __restrict optval, socklen_t* __restrict optlen) __THROW
     {
-        return getsockopt_origin(__fd, __level, __optname, __optval, __optlen);
+        return getsockopt_origin(fd, level, optname, optval, optlen);
     }
 
-    int setsockopt(int __fd, int __level, int __optname, const void* __optval, socklen_t __optlen) __THROW
+    int setsockopt(int fd, int level, int optname, const void* optval, socklen_t optlen) __THROW
     {
-        return setsockopt_origin(__fd, __level, __optname, __optval, __optlen);
+        return setsockopt_origin(fd, level, optname, optval, optlen);
     }
 
-    int connect(int __fd, __CONST_SOCKADDR_ARG __addr, socklen_t __len)
+    int connect(int fd, __CONST_SOCKADDR_ARG addr, socklen_t len)
     {
-        if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(__fd))
-            return connect_origin(__fd, __addr, __len);
+        if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(fd))
+        {
+            return connect_origin(fd, addr, len);
+        }
 
-        int ret {connect_origin(__fd, __addr, __len)};
+        int ret {connect_origin(fd, addr, len)};
         if (ret == 0)
+        {
             return 0;
-        if (ret != -1 && errno != EINPROGRESS)    // 如果不是 EINPROGRESS 错误，则直接返回错误
+        }
+        if (ret != -1 && errno != EINPROGRESS)
+        {    // 如果不是 EINPROGRESS 错误，则直接返回错误
             return ret;
+        }
 
         // 用于条件定时器
         TimerManager::TimePoint time_point {TimerManager::TimePoint::max()};
@@ -235,18 +278,23 @@ extern "C"
         bool                    is_timeout {false};
 
         // 默认连接超时时间为 1min
-        time_point = s_hook_io_scheduler->add_condition_timer(1min, false, weak_cond,
-                                                              [__fd, &is_timeout]
-                                                              {
-                                                                  is_timeout = true;
-                                                                  s_hook_io_scheduler->cancel_event(__fd, EPOLLOUT);
-                                                              });
+        time_point = s_hook_io_scheduler->add_condition_timer(
+            1min,
+            false,
+            weak_cond,
+            [fd, &is_timeout] -> void
+            {
+                is_timeout = true;
+                s_hook_io_scheduler->cancel_event(fd, EPOLLOUT);
+            }
+        );
 
-
-        if (s_hook_io_scheduler->add_event_as_fiber_yield(__fd, EPOLLOUT, false))
+        if (s_hook_io_scheduler->add_event_as_fiber_yield(fd, EPOLLOUT, false))
         {
             if (time_point != TimerManager::TimePoint::max())
+            {
                 s_hook_io_scheduler->del_timer(time_point);
+            }
 
             if (is_timeout)
             {
@@ -257,94 +305,103 @@ extern "C"
         else
         {
             if (time_point != TimerManager::TimePoint::max())
+            {
                 s_hook_io_scheduler->del_timer(time_point);
+            }
         }
 
         // 检查连接是否成功
         int       error {};
-        socklen_t len {sizeof(int)};
-        if (getsockopt(__fd, SOL_SOCKET, SO_ERROR, &error, &len) == -1)
-            return -1;
-        if (!error)
-            return 0;
-        else
+        socklen_t tmp_len {sizeof(int)};
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &tmp_len) == -1)
         {
-            errno = error;
             return -1;
         }
+        if (error == 0)
+        {
+            return 0;
+        }
+
+        errno = error;
+        return -1;
     }
 
-    int accept(int __fd, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len)
+    int accept(int fd, __SOCKADDR_ARG addr, socklen_t* __restrict addr_len)
     {
-        int fd {static_cast<int>(socket_io(__fd, EPOLLIN, SO_RCVTIMEO, accept_origin, __addr, __addr_len))};
+        int io_fd {static_cast<int>(socket_io(fd, EPOLLIN, SO_RCVTIMEO, accept_origin, addr, addr_len))};
         if (st_hook_enable && fd > 0)
-            fcntl_origin(fd, F_SETFL, fcntl_origin(fd, F_GETFL) | O_NONBLOCK);
-        return fd;
+        {
+            fcntl_origin(io_fd, F_SETFL, fcntl_origin(io_fd, F_GETFL) | O_NONBLOCK);
+        }
+        return io_fd;
     }
 
-    ssize_t send(int __fd, const void* __buf, size_t __n, int __flags)
+    ssize_t send(int fd, const void* buf, size_t n, int flags)
     {
-        return socket_io(__fd, EPOLLOUT, SO_SNDTIMEO, send_origin, __buf, __n, __flags);
+        return socket_io(fd, EPOLLOUT, SO_SNDTIMEO, send_origin, buf, n, flags);
     }
 
-    ssize_t recv(int __fd, void* __buf, size_t __n, int __flags)
+    ssize_t recv(int fd, void* buf, size_t n, int flags)
     {
-        return socket_io(__fd, EPOLLIN, SO_RCVTIMEO, recv_origin, __buf, __n, __flags);
+        return socket_io(fd, EPOLLIN, SO_RCVTIMEO, recv_origin, buf, n, flags);
     }
 
-    ssize_t sendto(int __fd, const void* __buf, size_t __n, int __flags, __CONST_SOCKADDR_ARG __addr, socklen_t __addr_len)
+    ssize_t sendto(int fd, const void* buf, size_t n, int flags, __CONST_SOCKADDR_ARG addr, socklen_t addr_len)
     {
-        return socket_io(__fd, EPOLLOUT, SO_SNDTIMEO, sendto_origin, __buf, __n, __flags, __addr, __addr_len);
+        return socket_io(fd, EPOLLOUT, SO_SNDTIMEO, sendto_origin, buf, n, flags, addr, addr_len);
     }
 
-    ssize_t recvfrom(int __fd, void* __restrict __buf, size_t __n, int __flags, __SOCKADDR_ARG __addr, socklen_t* __restrict __addr_len)
+    ssize_t
+    recvfrom(int fd, void* __restrict buf, size_t n, int flags, __SOCKADDR_ARG addr, socklen_t* __restrict addr_len)
     {
-        return socket_io(__fd, EPOLLIN, SO_RCVTIMEO, recvfrom_origin, __buf, __n, __flags, __addr, __addr_len);
+        return socket_io(fd, EPOLLIN, SO_RCVTIMEO, recvfrom_origin, buf, n, flags, addr, addr_len);
     }
 
-    ssize_t sendmsg(int __fd, const struct msghdr* __message, int __flags)
+    ssize_t sendmsg(int fd, const struct msghdr* message, int flags)
     {
-        return socket_io(__fd, EPOLLOUT, SO_SNDTIMEO, sendmsg_origin, __message, __flags);
+        return socket_io(fd, EPOLLOUT, SO_SNDTIMEO, sendmsg_origin, message, flags);
     }
 
-    ssize_t recvmsg(int __fd, struct msghdr* __message, int __flags)
+    ssize_t recvmsg(int fd, struct msghdr* message, int flags)
     {
-        return socket_io(__fd, EPOLLIN, SO_RCVTIMEO, recvmsg_origin, __message, __flags);
+        return socket_io(fd, EPOLLIN, SO_RCVTIMEO, recvmsg_origin, message, flags);
     }
 
-    ssize_t readv(int __fd, const struct iovec* __iovec, int __count)
+    ssize_t readv(int fd, const struct iovec* iovec, int count)
     {
-        return socket_io(__fd, EPOLLIN, SO_RCVTIMEO, readv_origin, __iovec, __count);
+        return socket_io(fd, EPOLLIN, SO_RCVTIMEO, readv_origin, iovec, count);
     }
 
-    ssize_t writev(int __fd, const struct iovec* __iovec, int __count)
+    ssize_t writev(int fd, const struct iovec* iovec, int count)
     {
-        return socket_io(__fd, EPOLLOUT, SO_SNDTIMEO, writev_origin, __iovec, __count);
+        return socket_io(fd, EPOLLOUT, SO_SNDTIMEO, writev_origin, iovec, count);
     }
 
-    int fcntl(int __fd, int __cmd, ...)
+    int fcntl(int fd, int cmd, ...)
     {
         va_list va;
-        va_start(va, __cmd);
+        va_start(va, cmd);
 
-        switch (__cmd)
+        switch (cmd)
         {
             case F_SETFL :
             {
                 int arg {va_arg(va, int)};
                 va_end(va);
 
-                if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(__fd))
-                    return fcntl_origin(__fd, F_SETFL, arg);
+                if (!st_hook_enable || !Fiber::is_in_scheduler() || !is_socket(fd))
+                {
+                    return fcntl_origin(fd, F_SETFL, arg);
+                }
 
-                return fcntl_origin(__fd, F_SETFL, arg | O_NONBLOCK);
+                return fcntl_origin(fd, F_SETFL, arg | O_NONBLOCK);
             }
             break;
 
             case F_GETFL :
             {
                 va_end(va);
-                return fcntl_origin(__fd, F_GETFL);
+                return fcntl_origin(fd, F_GETFL);
             }
             break;
 
@@ -362,7 +419,7 @@ extern "C"
                 int arg {va_arg(va, int)};
                 va_end(va);
 
-                return fcntl_origin(__fd, __cmd, arg);
+                return fcntl_origin(fd, cmd, arg);
             }
             break;
 
@@ -377,7 +434,7 @@ extern "C"
             {
                 va_end(va);
 
-                return fcntl_origin(__fd, __cmd);
+                return fcntl_origin(fd, cmd);
             }
             break;
 
@@ -388,7 +445,7 @@ extern "C"
                 flock* arg {va_arg(va, flock*)};
                 va_end(va);
 
-                return fcntl_origin(__fd, __cmd, arg);
+                return fcntl_origin(fd, cmd, arg);
             }
             break;
 
@@ -398,29 +455,27 @@ extern "C"
                 f_owner_ex* arg {va_arg(va, f_owner_ex*)};
                 va_end(va);
 
-                return fcntl_origin(__fd, __cmd, arg);
+                return fcntl_origin(fd, cmd, arg);
             }
             break;
 
-            default :
-                va_end(va);
-                return fcntl_origin(__fd, __cmd);
+            default : va_end(va); return fcntl_origin(fd, cmd);
         }
     }
 
-    int ioctl(int __fd, unsigned long int __request, ...) __THROW
+    int ioctl(int fd, unsigned long int request, ...) __THROW
     {
         va_list va;
-        va_start(va, __request);
+        va_start(va, request);
         void* arg {va_arg(va, void*)};
         va_end(va);
 
-        if (__request == FIONBIO)
+        if (request == FIONBIO)
         {
             int yes {1};
-            return ioctl_origin(__fd, FIONBIO, &yes);
+            return ioctl_origin(fd, FIONBIO, &yes);
         }
-        return ioctl_origin(__fd, __request, arg);
+        return ioctl_origin(fd, request, arg);
     }
 }
 

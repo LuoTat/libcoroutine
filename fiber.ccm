@@ -13,7 +13,7 @@ export class Fiber: public std::enable_shared_from_this<Fiber>
 
 public:
     // 协程状态
-    enum class State
+    enum class State : std::uint8_t
     {
         READY,
         RUNNING,
@@ -58,10 +58,14 @@ private:
     friend void func_wapper();
 
     State                 m_state {State::TERM};
-    ucontext_t            m_ctx;
+    ucontext_t            m_ctx {};
     void*                 m_stack {nullptr};
     std::size_t           m_stack_size {0};
     std::function<void()> m_func;
+
+    inline static thread_local bool                   m_in_scheduler {false};
+    inline static thread_local std::shared_ptr<Fiber> m_scheduler_fiber;
+    inline static thread_local std::shared_ptr<Fiber> m_running_fiber;
 };
 
 }    // namespace ltt
